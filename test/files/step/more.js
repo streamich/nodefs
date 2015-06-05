@@ -1,0 +1,2 @@
+
+module.export = 'more.js';

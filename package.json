@@ -1,0 +1,13 @@
+{
+  "name": "nodefs",
+  "version": "0.0.1",
+  "description": "A virtual filesystem for Node.js",
+  "main": "nodefs.js",
+  "repository": {
+    "type" : "git",
+    "url" : "https://github.com/streamich/nodefs.git"
+  },
+  "devDependencies": {
+    "chai":         "*"
+  }
+}

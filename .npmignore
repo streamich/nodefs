@@ -1,0 +1,7 @@
+node_modules/
+.idea/
+/test
+/typings
+tsd.json
+example.js
+*.ts
