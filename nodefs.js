@@ -26,6 +26,9 @@ var LNode = (function () {
     };
     LNode.prototype.setData = function (data) {
     };
+    LNode.prototype.getPath = function () {
+        return this.layer.mountpoint + this.path;
+    };
     LNode.prototype.stats = function () {
         return this.layer.drive.Stats.build(this);
     };
@@ -72,6 +75,10 @@ var LDirectory = (function (_super) {
 var Layer = (function () {
     function Layer(mountpoint) {
         /**
+         * Array of directory steps to the `mountpoint`.
+         */
+        this.steps = [];
+        /**
          * A map of relative file names to file contents 'string'.
          * {
          *  "test.txt": "...."
@@ -87,7 +94,9 @@ var Layer = (function () {
          * A map of pseudo 'file descriptors' to LNodes.
          */
         this.fds = {};
-        this.mountpoint = path.resolve(mountpoint) + path.sep;
+        this.mountpoint = path.resolve(mountpoint);
+        this.steps = this.mountpoint.split(path.sep);
+        this.mountpoint += path.sep;
     }
     Layer.prototype.getRelativePath = function (filepath) {
         return path.relative(this.mountpoint, filepath);
@@ -132,9 +141,63 @@ var Layer = (function () {
             this.addNode(node);
         }
     };
-    Layer.prototype.readdir = function (p) {
+    /**
+     * Return relative path if the path is insided the mounting point of this layer.
+     * @param p
+     */
+    Layer.prototype.relativePathIfInMp = function (p) {
         var rel = path.relative(this.mountpoint, p);
-        var expr = "^" + (rel ? rel + "/" : '') + "([^\/]*)(\/)?";
+        console.log(rel);
+        if ((rel[0] == '.') && (rel[1] == '.'))
+            return false;
+        else
+            return rel;
+    };
+    /**
+     * Path points to above or to mount point.
+     * @param abs_path
+     * @returns {boolean}
+     */
+    Layer.prototype.isAboveMp = function (abs_path) {
+        return abs_path == this.mountpoint.substr(0, abs_path.length);
+    };
+    /**
+     * Path points inside or to mount point.
+     * @param abs_path
+     * @returns {boolean}
+     */
+    Layer.prototype.isInMp = function (abs_path) {
+        return this.mountpoint == abs_path.substr(0, this.mountpoint.length);
+    };
+    Layer.prototype.stepsMatch = function (steps) {
+        var min = Math.min(steps.length, this.steps.length);
+        for (var i = 0; i < min; i++) {
+            if (steps[i] != this.steps[i])
+                break;
+        }
+        return i;
+    };
+    Layer.prototype.readdir = function (abs_path) {
+        if (!abs_path)
+            return [];
+        // Edge case when we have '/'.
+        if (abs_path[abs_path.length - 1] == path.sep)
+            abs_path = abs_path.substr(0, abs_path.length - 1);
+        var steps = abs_path.split(path.sep);
+        var steps_match = this.stepsMatch(steps);
+        var points_to_mountpoint = this.steps.length == steps_match;
+        // Is not pointing to or inside the mount point.
+        if (!points_to_mountpoint) {
+            if (steps_match == steps.length) {
+                return this.steps[steps_match];
+            }
+            else {
+                return [];
+            }
+        }
+        // Points to or inside the mount point.
+        var rel = path.relative(this.mountpoint, abs_path);
+        var expr = "^" + (rel ? rel + path.sep : '') + "([^" + path.sep + "]*)(" + path.sep + ")?";
         var files = [];
         var regex = new RegExp(expr);
         for (var npath in this.nodes) {
@@ -254,24 +317,23 @@ var Drive = (function () {
                 return readFile.apply(fs, arguments);
         };
         // fs.realpathSync(path[, cache])
-        var realPathSync = fs.realPathSync;
-        this.realPathSync = fs.realPathSync = function (file, opts) {
-            //console.log('realPathSync', file);
-            var filepath = self.getFilePath(file);
-            if (filepath !== null)
-                return filepath;
+        var realpathSync = fs.realpathSync;
+        this.realpathSync = fs.realpathSync = function (file, opts) {
+            var node = self.getNode(file);
+            if (node)
+                return node.getPath();
             else
-                return realPathSync.apply(fs, arguments);
+                return realpathSync.apply(fs, arguments);
         };
         // fs.realpath(path[, cache], callback)
         var realpath = fs.realpath;
         this.realpath = fs.realpath = function (filepath, cache, callback) {
             if (typeof cache == "function")
                 callback = cache;
-            filepath = self.getFilePath(filepath);
-            if (filepath !== null) {
+            var node = self.getNode(filepath);
+            if (node) {
                 process.nextTick(function () {
-                    callback(null, filepath);
+                    callback(null, node.getPath());
                 });
             }
             else
@@ -384,7 +446,7 @@ var Drive = (function () {
         // fs.readdirSync(path)
         var _readdirSync = function (p) {
             var files = [];
-            p = path.resolve(p) + '/';
+            p = path.resolve(p);
             for (var i = 0; i < this.layers.length; i++) {
                 var layer = this.layers[i];
                 files = files.concat(layer.readdir(p));
@@ -394,12 +456,14 @@ var Drive = (function () {
         var readdirSync = fs.readdirSync;
         this.readdirSync = fs.readdirSync = function (p) {
             var files = _readdirSync(p);
-            try {
-                files = files.concat(readdirSync.apply(fs, arguments));
-            }
-            catch (e) {
-                if (!files.length)
-                    throw e;
+            if (readdirSync) {
+                try {
+                    files = files.concat(readdirSync.apply(fs, arguments));
+                }
+                catch (e) {
+                    if (!files.length)
+                        throw e;
+                }
             }
             return removeDupes(files);
         };
@@ -407,18 +471,25 @@ var Drive = (function () {
         var readdir = fs.readdir;
         this.readdir = fs.readdir = function (p, callback) {
             var files = _readdirSync(p);
-            readdir.call(fs, p, function (err, more_files) {
-                if (err) {
-                    if (!files.length) {
-                        return callback(err);
+            if (readdir) {
+                readdir.call(fs, p, function (err, more_files) {
+                    if (err) {
+                        if (!files.length) {
+                            return callback(err);
+                        }
+                        else {
+                            callback(null, files);
+                        }
                     }
-                    else {
-                        callback(null, files);
-                    }
-                }
-                files = files.concat(more_files);
-                callback(null, removeDupes(files));
-            });
+                    files = files.concat(more_files);
+                    callback(null, removeDupes(files));
+                });
+            }
+            else {
+                process.nextTick(function () {
+                    callback(null, removeDupes(files));
+                });
+            }
         };
         // fs.appendFileSync(filename, data[, options])
         var appendFileSync = fs.appendFileSync;
@@ -536,14 +607,16 @@ var Drive = (function () {
         }
         return null;
     };
+    // TODO: Mount from URL:
+    // TODO: `mount('/usr/lib', 'http://example.com/volumes/usr/lib.json', callback)`
+    // TODO: ...also cache that it has been loaded...
     Drive.prototype.mount = function (mountpoint, archive, fs) {
         if (archive === void 0) { archive = {}; }
-        if (fs === void 0) { fs = null; }
         var layer = new Layer(mountpoint);
         layer.generateNodes(archive);
         this.addLayer(layer);
         if (!this.attached) {
-            this.attach(fs ? fs : require('fs'));
+            this.attach(fs || (fs === null) ? fs : require('fs'));
             this.attached = true;
         }
     };
