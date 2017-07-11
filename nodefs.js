@@ -421,7 +421,7 @@ var Drive = (function () {
         var existsSync = fs.existsSync;
         this.existsSync = fs.existsSync = function (filename) {
             var n = self.getFile(filename);
-            return n ? true : existsSync.apply(fs, filename);
+            return n ? true : existsSync.apply(fs, arguments);
         };
         // fs.exists(filename, callback)
         var exists = fs.exists;
