@@ -1,7 +1,9 @@
 
-> THIS IS OLD, USE `streamich/memfs` INSTEAD
-> THIS IS OLD, USE `streamich/memfs` INSTEAD
-> THIS IS OLD, USE `streamich/memfs` INSTEAD
+> THIS IS OLD, USE [`streamich/memfs`](https://github.com/streamich/memfs) INSTEAD
+>
+> THIS IS OLD, USE [`streamich/memfs`](https://github.com/streamich/memfs) INSTEAD
+>
+> THIS IS OLD, USE [`streamich/memfs`](https://github.com/streamich/memfs) INSTEAD
 
 # Virtual File System for Node.js
 
